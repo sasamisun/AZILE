@@ -31,14 +31,14 @@
         M.load();
         UI.clear();
         UI.sys('履歴・名前・機嫌・キャッシュを全部消したよ。はじめまして、からやり直そ。');
-        BRAIN.welcome(true).forEach((m) => UI.say(m));
+        BRAIN.welcome(true).forEach((m) => UI.say(m.html, m.emo));
         S.markSeen();
         UI.setMood(M.level());
         return true;
       case '/name':
         if (!arg) { UI.sys('使い方: <kbd>/name さくら</kbd>'); return true; }
         S.setUserName(arg.slice(0, 20));
-        UI.say('了解！ ' + BRAIN.esc(arg.slice(0, 20)) + 'って呼ぶね。');
+        UI.say('了解！ ' + BRAIN.esc(arg.slice(0, 20)) + 'って呼ぶね。', 'uresi');
         return true;
       case '/engine':
         UI.sys('形態素解析エンジン: <b>' + A.currentEngine().toUpperCase() + '</b>' +
@@ -56,7 +56,10 @@
         return true;
       }
       case '/time':
-        BRAIN.respond('今何時？').then((msgs) => msgs.forEach((m) => UI.say(m)));
+        BRAIN.respond('今何時？').then((msgs) => msgs.forEach((m) => UI.say(m.html, m.emo)));
+        return true;
+      case '/diary':
+        UI.say(BRAIN.diaryEntry(), 'raku');
         return true;
       default:
         UI.sys('知らないコマンド: ' + BRAIN.esc(cmd) + '。<kbd>/help</kbd> で一覧を見てね。');
@@ -77,13 +80,13 @@
       msgs = await BRAIN.respond(text);
     } catch (e) {
       console.error(e);
-      msgs = ['うっ、頭の中でゼロ除算が起きた。もう一回言ってくれる？'];
+      msgs = [{ html: 'うっ、頭の中でゼロ除算が起きた。もう一回言ってくれる？', emo: 'housin' }];
     }
     UI.hideThinking();
     for (const m of msgs) {
-      if (!m) continue;
-      S.pushHistory('azile', m);
-      await UI.say(m);
+      if (!m || !m.html) continue;
+      S.pushHistory('azile', m.html, m.emo);
+      await UI.say(m.html, m.emo);
     }
     busy = false;
     UI.resetIdle();
@@ -94,9 +97,9 @@
     let msgs;
     try { msgs = await BRAIN.idleTalk(streak); } catch (e) { console.error(e); return; }
     for (const m of msgs) {
-      if (!m) continue;
-      S.pushHistory('azile', m);
-      await UI.say(m);
+      if (!m || !m.html) continue;
+      S.pushHistory('azile', m.html, m.emo);
+      await UI.say(m.html, m.emo);
     }
   }
 
@@ -114,10 +117,12 @@
     if (history.length) {
       history.forEach((h) => UI.printNow(h.role === 'user' ? 'user' : 'azile', h.html));
       UI.sys('── 前回の続き（' + history.length + ' 行を復元） ──');
+      const lastEmo = history.slice().reverse().find((h) => h.role === 'azile' && h.emo);
+      if (lastEmo) UI.setEmotion(lastEmo.emo);
     }
 
     const first = S.isFirstVisit();
-    BRAIN.welcome(first).forEach((m) => { UI.say(m); S.pushHistory('azile', m); });
+    BRAIN.welcome(first).forEach((m) => { UI.say(m.html, m.emo); S.pushHistory('azile', m.html, m.emo); });
     S.markSeen();
 
     /* kuromoji を裏でロード */

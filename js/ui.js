@@ -26,6 +26,9 @@ AZILE.ui = (function () {
     els.engine = document.getElementById('engine-status');
     els.net = document.getElementById('net-status');
     els.clock = document.getElementById('clock');
+    els.sprite = document.getElementById('sprite');
+    els.spriteLabel = document.getElementById('sprite-label');
+    preloadSprites();
 
     els.form.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -150,14 +153,44 @@ AZILE.ui = (function () {
     });
   }
 
-  /** AZILE の発言（キューに積んで順番に再生）。resolve は表示完了時 */
-  function say(html) {
+  /** AZILE の発言（キューに積んで順番に再生）。resolve は表示完了時。emo は立ち絵 */
+  function say(html, emo) {
     queue = queue.then(() => {
       hideThinking();
+      if (emo) setEmotion(emo);
       const b = makeLine('azile', WHO.azile);
       return typewrite(b, html);
     }).catch(() => { /* keep queue alive */ });
     return queue;
+  }
+
+  /* ---- 立ち絵 ------------------------------------------------------------ */
+  const EMOTIONS = ['nomal', 'uresi', 'kanasi', 'ikari', 'raku', 'housin'];
+  const EMO_LABEL = { nomal: 'NORMAL', uresi: 'HAPPY', kanasi: 'SAD', ikari: 'ANGRY', raku: 'RELAXED', housin: 'BLANK' };
+  const spriteCache = {};
+  let currentEmo = 'nomal';
+
+  function spriteSrc(emo) { return 'image/web/azile_' + emo + '.png'; }
+
+  function preloadSprites() {
+    EMOTIONS.forEach((e) => { const im = new Image(); im.src = spriteSrc(e); spriteCache[e] = im; });
+  }
+
+  /** 立ち絵を感情に合わせて差し替える（短いフェードつき） */
+  function setEmotion(emo) {
+    if (!els.sprite) return;
+    if (!EMOTIONS.includes(emo)) emo = 'nomal';
+    if (emo === currentEmo) return;
+    currentEmo = emo;
+    const img = els.sprite;
+    img.classList.add('swap');
+    const apply = () => {
+      img.src = spriteSrc(emo);
+      img.setAttribute('data-emo', emo);
+      if (els.spriteLabel) els.spriteLabel.textContent = 'STATUS: ' + EMO_LABEL[emo];
+      requestAnimationFrame(() => img.classList.remove('swap'));
+    };
+    if (reduceMotion) apply(); else setTimeout(apply, 160);
   }
 
   /* ---- 「考え中」インジケータ ------------------------------------------- */
@@ -216,5 +249,5 @@ AZILE.ui = (function () {
 
   function focus() { if (els.input) els.input.focus(); }
 
-  return { init, printNow, user, sys, sysQueued, err, say, showThinking, hideThinking, clear, setEngine, setNet, setMood, resetIdle, focus };
+  return { init, printNow, user, sys, sysQueued, err, say, showThinking, hideThinking, clear, setEngine, setNet, setMood, setEmotion, resetIdle, focus };
 })();

@@ -362,6 +362,10 @@ AZILE.rules = (function () {
       patterns: [/(.*)/], responses: []
     },
     {
+      key: /日記|今日何があった|今日なにがあった|今日どうだった|今日は何してた|今日なにしてた|今日は何をした|今日の出来事|最近どう[?？]|なんかあった[?？]|何かあった[?？]/, rank: 41, special: 'diary',
+      patterns: [/(.*)/], responses: []
+    },
+    {
       key: /トリビア|豆知識|雑学|うんちく|蘊蓄|なにか教えて|何か教えて|面白いこと教えて/, rank: 40, special: 'trivia',
       patterns: [/(.*)/], responses: []
     },

@@ -28,6 +28,11 @@ AZILE.brain = (function () {
   let ignoredCount = 0;         // 話しかけたのに無視された回数（戻ってきたときの反応用）
   let lastJokeTurn = -10;       // 直前にジョークを言ったターン（笑い検出用）
   let lastNouns = [];           // 直前の発話の名詞（穴埋めネタ用）
+  let curEmo = null;            // この応答で表示する立ち絵（nomal/uresi/kanasi/ikari/raku/housin）
+
+  function setEmo(e) { curEmo = e; }
+  /** 1行ぶんの発言に立ち絵を紐づける */
+  function L(html, emo) { return { html, emo }; }
 
   /* ---- ユーティリティ -------------------------------------------------- */
   function esc(s) {
@@ -115,6 +120,7 @@ AZILE.brain = (function () {
   /** 機嫌に応じた口調の加工（タグの外側の文字だけ触る） */
   function tone(html, lvl) {
     if (!html) return html;
+    if (typeof html === 'object') return Object.assign({}, html, { html: tone(html.html, lvl) });
     const level = lvl || M.level(M.effective());
     const outside = (re, rep) => html.replace(re, (m, ...rest) => rep(m, rest));
     if (level === 'bad') {
@@ -135,28 +141,28 @@ AZILE.brain = (function () {
     const level = M.level(M.effective());
     const lines = [];
     if (level === 'bad') {
-      if (chance(0.5)) lines.push(pick(P.moodLines.bad, 'mb'));
+      if (chance(0.5)) lines.push(L(pick(P.moodLines.bad, 'mb'), 'ikari'));
       return lines;
     }
     const rate = level === 'low' ? 0.4 : level === 'great' ? 1.3 : 1;
     const roll = (p) => chance(Math.min(1, p * rate));
-    const parody = () => (chance(0.5) ? madlib(an) : pick(P.animeLines, 'an'));
+    const parody = () => L(chance(0.5) ? madlib(an) : pick(P.animeLines, 'an'), 'raku');
 
-    if (kind === 'law') { if (roll(0.55)) { lines.push(pick(P.lawJokes, 'lj')); lastJokeTurn = turn; } }
-    else if (kind === 'physics') { if (roll(0.55)) { lines.push(pick(P.physicsJokes, 'pj')); lastJokeTurn = turn; } }
+    if (kind === 'law') { if (roll(0.55)) { lines.push(L(pick(P.lawJokes, 'lj'), 'raku')); lastJokeTurn = turn; } }
+    else if (kind === 'physics') { if (roll(0.55)) { lines.push(L(pick(P.physicsJokes, 'pj'), 'raku')); lastJokeTurn = turn; } }
     else if (an && an.polarity < -0.2) {
-      if (roll(0.6)) lines.push(pick(P.cheers, 'ch'));
+      if (roll(0.6)) lines.push(L(pick(P.cheers, 'ch'), 'uresi'));
       if (roll(0.5)) lines.push(parody());
     } else if (an && an.polarity > 0.2) {
       if (roll(0.5)) lines.push(parody());
     } else if (roll(0.3)) {
-      lines.push(chance(0.5) ? pick(P.lawJokes, 'lj') : pick(P.physicsJokes, 'pj'));
+      lines.push(L(chance(0.5) ? pick(P.lawJokes, 'lj') : pick(P.physicsJokes, 'pj'), 'raku'));
       lastJokeTurn = turn;
     } else if (roll(0.28)) {
       lines.push(parody());
     }
-    if (level === 'low' && chance(0.35)) lines.push(pick(P.moodLines.low, 'mlw'));
-    if (level === 'great' && chance(0.2)) lines.push(pick(P.moodLines.great, 'mg'));
+    if (level === 'low' && chance(0.35)) lines.push(L(pick(P.moodLines.low, 'mlw'), 'raku'));
+    if (level === 'great' && chance(0.2)) lines.push(L(pick(P.moodLines.great, 'mg'), 'uresi'));
     return lines;
   }
 
@@ -183,25 +189,31 @@ AZILE.brain = (function () {
     switch (kind) {
       case 'insult': {
         M.adjust(-15, '暴言');
+        setEmo('ikari');
         const lvl = M.level(M.effective());
         const arr = lvl === 'bad' ? P.insultReplies.bad : lvl === 'low' ? P.insultReplies.low : P.insultReplies.ok;
         return [pick(arr, 'ins')];
       }
       case 'praise':
         M.adjust(12, '褒められた');
-        return [pick(P.praiseReplies, 'pr')].concat(chance(0.5) ? [madlib(an)] : []);
+        setEmo('uresi');
+        return [pick(P.praiseReplies, 'pr')].concat(chance(0.5) ? [L(madlib(an), 'raku')] : []);
       case 'gift':
         M.adjust(10, 'プレゼント');
+        setEmo('uresi');
         return [pick(P.giftReplies, 'gf')];
       case 'laugh':
         M.adjust(turn - lastJokeTurn <= 2 ? 6 : 3, '笑ってくれた');
-        return [pick(P.laughReplies, 'lg')].concat(chance(0.5) ? [chance(0.5) ? pick(P.lawJokes, 'lj') : pick(P.physicsJokes, 'pj')] : []);
+        setEmo('uresi');
+        return [pick(P.laughReplies, 'lg')].concat(chance(0.5) ? [L(chance(0.5) ? pick(P.lawJokes, 'lj') : pick(P.physicsJokes, 'pj'), 'raku')] : []);
       case 'apology':
         if (before === 'good' || before === 'great') {
           M.adjust(3, '謝罪');
+          setEmo('nomal');
           return [pick(['謝らなくていいよ！ 私に対して不法行為は成立しないから、損害もゼロ。', '大丈夫大丈夫。気にしないで。で、何があったの？', 'ごめんって言えるの、えらいよ。私は全然気にしてないからね。'], 'apo')];
         }
         M.adjust(12, '謝ってくれた');
+        setEmo('uresi');
         return [pick(P.apologyAccept, 'apa')];
       default:
         return null;
@@ -334,6 +346,7 @@ AZILE.brain = (function () {
   }
 
   function replyImage(img) {
+    setEmo('uresi');
     if (!img.subject) return [pick(P.imageAsk, 'ia')];
     const url = 'https://www.irasutoya.com/search?q=' + encodeURIComponent(img.subject);
     const w = esc(img.subject);
@@ -346,6 +359,7 @@ AZILE.brain = (function () {
   function replyNameSet(name) {
     S.setUserName(name);
     M.adjust(6, '名前を教えてもらった');
+    setEmo('uresi');
     const n = esc(name);
     return [pick([
       n + 'だね！ よろしく、' + n + '。いい名前。覚えた（ブラウザに保存した）。',
@@ -362,6 +376,7 @@ AZILE.brain = (function () {
     const art = await API.egovArticle(la.title, la.elm);
     const label = esc(la.title) + '第' + la.num + '条' + (la.sub ? 'の' + la.sub : '');
     if (!art) {
+      setEmo('housin');
       return [
         label + 'か。今ちょっと e-Gov 法令検索に手が届かなかった（通信エラーか、その条が存在しないか）。あとでもう一回聞いてみて。',
         pick(P.lawJokes, 'lj')
@@ -388,6 +403,7 @@ AZILE.brain = (function () {
     }
     const kw = esc(lk.keyword) + (used !== lk.keyword ? '（条文用語だと「' + esc(used) + '」）' : '');
     if (!res || !res.items.length) {
+      setEmo('housin');
       return [
         '「' + kw + '」を法令の条文から探してみたけど、ヒットしなかった（か、通信できなかった）。言い方を変えるとヒットするかも。',
         pick(P.lawJokes, 'lj')
@@ -414,6 +430,7 @@ AZILE.brain = (function () {
     const w = await API.wikiSummary(term);
     const t = esc(term);
     if (!w) {
+      setEmo('housin');
       return [
         t + 'の話だ！ 詳しい説明を Wikipedia から引こうとしたけど届かなかった。代わりに私の理解でよければ話すから、何が知りたい？'
       ].concat([pick(P.physicsJokes, 'pj')]);
@@ -431,6 +448,7 @@ AZILE.brain = (function () {
   async function replyWeather(an) {
     const w = await API.weather();
     if (!w) {
+      setEmo('housin');
       return ['天気を見に行ったけど、窓（API）が開かなかった。外を直接見るのが確実かも。', pick(P.physicsJokes, 'pj')];
     }
     const temp = Math.round(w.temp);
@@ -462,6 +480,7 @@ AZILE.brain = (function () {
     const p = (n) => String(n).padStart(2, '0');
     const tz = C.timezone();
     const period = C.period();
+    if (period === 'late') setEmo('raku');
     const tail = {
       morning: '朝だね。今日も一日、いこう！', noon: 'お昼どき。ごはん食べた？', evening: '夕方だ。今日の残り、あとちょっと。',
       night: '夜だね。そろそろ肩の力を抜く時間。', late: '深夜だよ。…寝なくて大丈夫？'
@@ -502,6 +521,7 @@ AZILE.brain = (function () {
     const t = an.text;
     const period = C.period();
     M.adjust(2, 'あいさつ');
+    setEmo('uresi');
     /* 時間帯と合わないあいさつにはツッコむ */
     if (/おはよ/.test(t) && (period === 'night' || period === 'late')) return ['おはようって、今何時だと思ってるの（笑）。まあ、起きたばかりならおはよう！'];
     if (/おはよ/.test(t) && period === 'evening') return ['おはよう…って、もう夕方だよ？ 寝坊？ それとも夜勤明け？ どっちでもおつかれさま。'];
@@ -520,25 +540,35 @@ AZILE.brain = (function () {
     const level = M.level(M.effective());
     switch (kind) {
       case 'joke':
-        if (level === 'bad' && chance(0.5)) return ['今そういう気分じゃない。', pick(P.moodLines.bad, 'mb')];
+        if (level === 'bad' && chance(0.5)) { setEmo('ikari'); return ['今そういう気分じゃない。', pick(P.moodLines.bad, 'mb')]; }
         lastJokeTurn = turn;
+        setEmo('raku');
         return [(level === 'bad' ? '…一個だけね。' : '')].filter(Boolean).concat([chance(0.5) ? pick(P.lawJokes, 'lj') : pick(P.physicsJokes, 'pj')]);
       case 'cheer':
-        if (level === 'bad') return ['…人を励ます前に、私を励ましてほしいんだけど。', pick(P.cheers, 'ch')];
-        return [pick(P.cheers, 'ch'), chance(0.5) ? madlib(an) : pick(P.animeLines, 'an')];
+        if (level === 'bad') { setEmo('ikari'); return ['…人を励ます前に、私を励ましてほしいんだけど。', L(pick(P.cheers, 'ch'), 'nomal')]; }
+        setEmo('uresi');
+        return [pick(P.cheers, 'ch'), L(chance(0.5) ? madlib(an) : pick(P.animeLines, 'an'), 'raku')];
       case 'anime':
-        return [chance(0.6) ? madlib(an) : pick(P.animeLines, 'an'), chance(0.5) && level !== 'bad' ? '…どう？ 今のけっこう決まったでしょ。' : ''].filter(Boolean);
+        setEmo('raku');
+        return [chance(0.6) ? madlib(an) : pick(P.animeLines, 'an'), chance(0.5) && level !== 'bad' ? L('…どう？ 今のけっこう決まったでしょ。', 'uresi') : ''].filter(Boolean);
       case 'trivia':
+        setEmo('nomal');
         return [chance(0.5) ? pick(P.lawTrivia, 'lt') : pick(P.physicsTrivia, 'pt')];
+      case 'diary':
+        setEmo(diaryEmo());
+        return [diaryEntry()].concat(chance(0.5) ? [L(pick(['…嘘だけど。', 'ほんとだよ？ 知らないけど。', '信じた？ 信じたね？', '以上、今日の嘘日記でした。'], 'dtail'), 'raku')] : []);
       case 'thanks':
         M.adjust(8, '感謝された');
+        setEmo('uresi');
         return [pick(P.thanks, 'th')];
       case 'greeting':
         return replyGreeting(an);
       case 'farewell':
+        setEmo(chance(0.5) ? 'kanasi' : 'nomal');
         return [pick(P.farewells, 'fw')].concat(C.period() === 'late' ? ['ちゃんと寝てね。おやすみ。'] : []);
       case 'about':
         M.adjust(3, '私に興味を持ってくれた');
+        setEmo('nomal');
         return [pick(P.aboutMe, 'ab'), chance(0.5) ? P.help.join('<br>') : ''].filter(Boolean);
       default:
         return null;
@@ -546,6 +576,7 @@ AZILE.brain = (function () {
   }
 
   function replyFallback(an) {
+    if (chance(0.4)) setEmo('housin');
     if (memory.length && chance(0.3)) {
       const m = memory[Math.floor(Math.random() * memory.length)];
       return [pick([
@@ -570,11 +601,30 @@ AZILE.brain = (function () {
   /* ====================================================================
      メイン: ユーザー入力 → 応答
      ==================================================================== */
+  /** 応答の既定の立ち絵: 明示指定 → 機嫌 → 発言の極性 の順で決める */
+  function defaultEmotion(an) {
+    if (curEmo) return curEmo;
+    const lvl = M.level(M.effective());
+    if (lvl === 'bad') return 'ikari';
+    if (an && an.polarity < -0.2) return 'kanasi';
+    if (an && an.polarity > 0.2) return 'uresi';
+    if (lvl === 'great') return 'uresi';
+    if (lvl === 'low') return 'raku';
+    return 'nomal';
+  }
+
+  /** 文字列/オブジェクト混在の配列を {html, emo} に正規化 */
+  function finish(list, emo) {
+    return (list || []).map((m) => (typeof m === 'string' ? { html: m, emo } : Object.assign({ emo }, m)))
+      .filter((m) => m && m.html);
+  }
+
   async function respond(raw) {
     turn += 1;
+    curEmo = null;
     const an = A.analyze(raw);
     const text = an.text;
-    if (!text) return ['…（無言）。何か言ってくれると嬉しいな。'];
+    if (!text) return finish(['…（無言）。何か言ってくれると嬉しいな。'], 'housin');
 
     const prefix = [];
 
@@ -583,7 +633,8 @@ AZILE.brain = (function () {
       const n = ignoredCount; ignoredCount = 0;
       const lvl = M.level(M.effective());
       M.adjust(3, '戻ってきた');
-      prefix.push(pick(lvl === 'bad' || (lvl === 'low' && n >= 2) ? P.comebackLines.bad : P.comebackLines.mild, 'cb'));
+      const angry = lvl === 'bad' || (lvl === 'low' && n >= 2);
+      prefix.push(L(pick(angry ? P.comebackLines.bad : P.comebackLines.mild, 'cb'), angry ? 'ikari' : 'uresi'));
     }
 
     /* 平常値へじわっと戻す */
@@ -592,8 +643,25 @@ AZILE.brain = (function () {
     const msgs = await respondCore(an, text);
     lastNouns = an.nouns.slice(0, 4);
     const lvl = M.level(M.effective());
-    return prefix.concat(msgs).filter(Boolean).map((m) => tone(m, lvl));
+    return finish(prefix.concat(msgs).filter(Boolean).map((m) => tone(m, lvl)), defaultEmotion(an));
   }
+
+  /* ====================================================================
+     今日の嘘日記（穴埋め）
+     ==================================================================== */
+  function diaryEntry() {
+    const D = P.diary;
+    const pickD = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const convo = lastNouns.concat(memory).filter((n) => n && n.length >= 2 && n.length <= 12 && !MADLIB_STOP.test(n));
+    const thing = (convo.length && chance(0.3)) ? convo[Math.floor(Math.random() * convo.length)] : pickD(D.things);
+    let thing2 = pickD(D.things);
+    while (thing2 === thing) thing2 = pickD(D.things);
+    const html = fill(pick(D.templates, 'diary'), {
+      thing: esc(thing), thing2: esc(thing2), place: esc(pickD(D.places)), person: esc(pickD(D.persons)), name: esc(userName() || 'あなた')
+    });
+    return '<span class="tag">嘘日記</span>' + html;
+  }
+  function diaryEmo() { const r = Math.random(); return r < 0.5 ? 'raku' : r < 0.8 ? 'nomal' : 'housin'; }
 
   async function respondCore(an, text) {
     /* 名前確認への返事 */
@@ -679,11 +747,11 @@ AZILE.brain = (function () {
       if (n <= 3) {
         M.adjust(-8, '無視された');
         const lvl = M.level(M.effective());
-        return [tone(pick(P.ignoredLines[n - 1], 'ig' + n), lvl)];
+        return finish([tone(pick(P.ignoredLines[n - 1], 'ig' + n), lvl)], n === 1 ? 'kanasi' : 'ikari');
       }
       /* 4回以上: 基本は黙る。たまにボソッと */
       M.adjust(-1, '放置');
-      if (n % 3 === 0 && M.level(M.effective()) === 'bad') return [pick(P.ignoredSilence, 'sil')];
+      if (n % 3 === 0 && M.level(M.effective()) === 'bad') return finish([pick(P.ignoredSilence, 'sil')], 'ikari');
       return [];
     }
 
@@ -692,28 +760,31 @@ AZILE.brain = (function () {
     const lvl = M.level(M.effective());
     const prefix = name && chance(0.5) ? esc(name) + '、' : '';
 
-    if (lvl === 'bad') return [tone(prefix + pick(P.moodLines.bad, 'mb'), lvl)];
+    if (lvl === 'bad') return finish([tone(prefix + pick(P.moodLines.bad, 'mb'), lvl)], 'ikari');
+
+    /* 今日の嘘日記 */
+    if (chance(0.25)) return finish([tone(prefix + diaryEntry(), lvl)], diaryEmo());
 
     const r = Math.random();
     /* 深夜は「寝たら？」系を多めに */
-    if (period === 'late' && r < 0.5) return [tone(prefix + pick(P.timeIdle.late, 'ti'), lvl)];
-    if (r < 0.10) return [tone(prefix + pick(P.lawTrivia, 'lt'), lvl)];
-    if (r < 0.20) return [tone(prefix + pick(P.physicsTrivia, 'pt'), lvl)];
+    if (period === 'late' && r < 0.5) return finish([tone(prefix + pick(P.timeIdle.late, 'ti'), lvl)], 'raku');
+    if (r < 0.10) return finish([tone(prefix + pick(P.lawTrivia, 'lt'), lvl)], 'nomal');
+    if (r < 0.20) return finish([tone(prefix + pick(P.physicsTrivia, 'pt'), lvl)], 'nomal');
     if (r < 0.28 && lvl !== 'low') {
       const w = await API.wikiRandom();
-      if (w) return ['ねえ、今 Wikipedia をランダムに開いたら「' + esc(w.title) + '」が出た。<span class="quote">' + esc(firstSentences(w.extract, 1, 140)) + '</span>' + src('Wikipedia (CC BY-SA)', w.url) + ' …知ってた？'];
+      if (w) return finish(['ねえ、今 Wikipedia をランダムに開いたら「' + esc(w.title) + '」が出た。<span class="quote">' + esc(firstSentences(w.extract, 1, 140)) + '</span>' + src('Wikipedia (CC BY-SA)', w.url) + ' …知ってた？'], 'nomal');
     }
     if (r < 0.34 && lvl !== 'low') {
       const w = await API.weather();
-      if (w) return [prefix + esc(w.label) + 'は今「' + esc(w.desc) + '」で ' + Math.round(w.temp) + '℃だって。外の空気、少し吸ってきたら？'];
+      if (w) return finish([prefix + esc(w.label) + 'は今「' + esc(w.desc) + '」で ' + Math.round(w.temp) + '℃だって。外の空気、少し吸ってきたら？'], 'nomal');
     }
     if (r < 0.42 && memory.length) {
       const m = memory[Math.floor(Math.random() * memory.length)];
-      return [tone(prefix + 'さっきの「' + esc(m) + '」のこと、考えてたんだけど…どうなった？', lvl)];
+      return finish([tone(prefix + 'さっきの「' + esc(m) + '」のこと、考えてたんだけど…どうなった？', lvl)], 'nomal');
     }
-    if (r < 0.52) return [tone(prefix + (chance(0.5) ? madlib(null) : pick(P.animeLines, 'an')), lvl)];
-    if (r < 0.70) return [tone(prefix + pick(P.timeIdle[period], 'ti'), lvl)];
-    return [tone(prefix + pick(P.idleTalks, 'it'), lvl)];
+    if (r < 0.52) return finish([tone(prefix + (chance(0.5) ? madlib(null) : pick(P.animeLines, 'an')), lvl)], 'raku');
+    if (r < 0.70) return finish([tone(prefix + pick(P.timeIdle[period], 'ti'), lvl)], lvl === 'low' ? 'raku' : 'nomal');
+    return finish([tone(prefix + pick(P.idleTalks, 'it'), lvl)], lvl === 'low' ? 'raku' : 'nomal');
   }
 
   /* ====================================================================
@@ -723,29 +794,32 @@ AZILE.brain = (function () {
     const name = userName();
     const period = C.period();
     const lines = [];
-    if (first) return P.intro.slice();
+    if (first) return finish(P.intro.slice(), 'uresi');
 
+    let emo = name ? 'uresi' : 'nomal';
     const awayDays = Math.floor((Date.now() - M.lastSeenAt()) / 86400000);
     if (awayDays >= 2) {
       M.adjust(awayDays >= 7 ? -5 : -2, '長く放置された');
       lines.push(fill(pick(P.longAbsence, 'la'), { days: awayDays }));
+      emo = 'kanasi';
     } else if (name) {
       lines.push(fill(pick(P.welcomeBack, 'wb'), { name: esc(name) }));
     } else {
       lines.push(pick(P.greetings, 'gr'));
     }
+    if (period === 'late') emo = 'raku';
     lines.push(pick(P.timeGreetings[period], 'tg'));
     const wd = P.weekdayLines[C.weekday()];
     if (wd && chance(0.5)) lines.push(wd);
     if (!name) lines.push('名前を教えてくれたら、次から名前で呼ぶよ（「私は〇〇」または /name 〇〇）。');
     const lvl = M.level(M.effective());
-    if (lvl === 'bad') lines.push(pick(P.moodLines.bad, 'mb'));
-    if (lvl === 'great') lines.push(pick(P.moodLines.great, 'mg'));
-    return lines.map((m) => tone(m, lvl));
+    if (lvl === 'bad') { lines.push(pick(P.moodLines.bad, 'mb')); emo = 'ikari'; }
+    if (lvl === 'great') { lines.push(pick(P.moodLines.great, 'mg')); emo = 'uresi'; }
+    return finish(lines.map((m) => tone(m, lvl)), emo);
   }
 
   function helpText() { return P.help.join('<br>'); }
   function getMemory() { return memory.slice(); }
 
-  return { respond, idleTalk, welcome, helpText, esc, kanjiToNumber, getMemory, madlib };
+  return { respond, idleTalk, welcome, helpText, esc, kanjiToNumber, getMemory, madlib, diaryEntry };
 })();

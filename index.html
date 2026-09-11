@@ -29,14 +29,25 @@
       </div>
     </header>
 
-    <section class="term-output" id="output" aria-live="polite" aria-label="会話ログ"></section>
+    <div class="term-body">
+      <div class="term-main">
+        <section class="term-output" id="output" aria-live="polite" aria-label="会話ログ"></section>
 
-    <form class="term-prompt" id="prompt-form" autocomplete="off">
-      <label class="prompt-label" for="prompt-input">you&gt;</label>
-      <input class="prompt-input" id="prompt-input" type="text" inputmode="text"
-             placeholder="なにか話しかけてみて（/help でコマンド一覧）" maxlength="400" autofocus>
-      <button class="prompt-send" type="submit" aria-label="送信">⏎</button>
-    </form>
+        <form class="term-prompt" id="prompt-form" autocomplete="off">
+          <label class="prompt-label" for="prompt-input">you&gt;</label>
+          <input class="prompt-input" id="prompt-input" type="text" inputmode="text"
+                 placeholder="なにか話しかけてみて（/help でコマンド一覧）" maxlength="400" autofocus>
+          <button class="prompt-send" type="submit" aria-label="送信">⏎</button>
+        </form>
+      </div>
+
+      <aside class="term-side" aria-label="AZILE の立ち絵">
+        <div class="sprite-frame">
+          <img class="sprite" id="sprite" src="image/web/azile_nomal.png" alt="AZILE" data-emo="nomal" decoding="async">
+        </div>
+        <div class="sprite-label" id="sprite-label">STATUS: NORMAL</div>
+      </aside>
+    </div>
   </main>
 
   <!-- 形態素解析: TinySegmenter（即時） + kuromoji.js（辞書ロード後に切替） -->

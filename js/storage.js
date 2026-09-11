@@ -40,9 +40,9 @@ AZILE.storage = (function () {
     return Array.isArray(h) ? h : [];
   }
 
-  function pushHistory(role, html) {
+  function pushHistory(role, html, emo) {
     const h = getHistory();
-    h.push({ role, html, ts: Date.now() });
+    h.push({ role, html, emo: emo || undefined, ts: Date.now() });
     while (h.length > HISTORY_LIMIT) h.shift();
     write(KEY_HISTORY, h);
   }
