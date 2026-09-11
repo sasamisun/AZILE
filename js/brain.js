@@ -13,6 +13,7 @@ AZILE.brain = (function () {
   'use strict';
 
   const P = AZILE.persona;
+  const RP = AZILE.replies;
   const R = AZILE.rules;
   const A = AZILE.analyzer;
   const API = AZILE.api;
@@ -147,6 +148,12 @@ AZILE.brain = (function () {
     const rate = level === 'low' ? 0.4 : level === 'great' ? 1.3 : 1;
     const roll = (p) => chance(Math.min(1, p * rate));
     const parody = () => L(chance(0.5) ? madlib(an) : pick(P.animeLines, 'an'), 'raku');
+
+    /* 話題語があれば、ジョークの代わりに「私の場合は〜」を差し込むことがある */
+    if (!kind && an && an.topic && roll(0.25)) {
+      lines.push(L(selfLine(an), 'raku'));
+      return lines;
+    }
 
     if (kind === 'law') { if (roll(0.55)) { lines.push(L(pick(P.lawJokes, 'lj'), 'raku')); lastJokeTurn = turn; } }
     else if (kind === 'physics') { if (roll(0.55)) { lines.push(L(pick(P.physicsJokes, 'pj'), 'raku')); lastJokeTurn = turn; } }
@@ -318,7 +325,7 @@ AZILE.brain = (function () {
   const WEATHER_RE = /(天気|気温|何度|暑い|あつい|寒い|さむい|雨|晴れ|曇り|雪|降って|降る|台風|湿度|風強)/;
 
   function detectWhatIs(text) {
-    const m = text.match(/^(.+?)(?:って|とは|とは何|について|の意味|の定義)(?:何|なに|なん|どういう|どんな|意味|教えて|説明|知って)?.*[?？]?$/);
+    const m = text.match(/^(.+?)(?:って|とは|とは何|について|の意味|の定義)(?:何|なに|なん|どういう|どんな|意味|教えて|説明|知って|[?？]|$)/);
     if (!m) return null;
     let subj = m[1].replace(/^(ねえ|ねぇ|あの|えっと|ちなみに|そういえば|じゃあ|あと)[、,]?/, '').trim();
     if (!subj || subj.length > 20 || /(私|あなた|君|きみ|お前|これ|それ|あれ)/.test(subj)) return null;
@@ -495,9 +502,13 @@ AZILE.brain = (function () {
   function applyRules(an) {
     const text = an.text;
     let best = null;
+    let bestRank = -1;
     for (const rule of R.rules) {
       const re = rule.key instanceof RegExp ? rule.key : new RegExp(rule.key);
-      if (re.test(text) && (!best || rule.rank > best.rank)) best = rule;
+      if (!re.test(text)) continue;
+      /* 質問文では、感情の強いルール（rank 30 以上）と特殊ルール以外は降格して、話題語ベースの返答に譲る */
+      const rank = (an.isQuestion && !rule.special && !rule.q && rule.rank < 30) ? rule.rank - 20 : rule.rank;
+      if (rank > bestRank) { best = rule; bestRank = rank; }
     }
     if (!best) return null;
 
@@ -512,9 +523,99 @@ AZILE.brain = (function () {
       }
     }
     if (vars[1] && vars[1] === esc(text)) vars[1] = '';
+    if (!vars[1] && an.topic) vars[1] = esc(an.topic);   // 分解できなかったら話題語で補う
     if (best.memory && vars[1]) remember(vars[1]);
     const tpl = pick(best.responses, best);
-    return { html: fill(tpl, vars) };
+    return { html: fill(tpl, vars), rank: bestRank };
+  }
+
+  /* ====================================================================
+     話題語ベースの返答（質問／平叙文で分岐、「私の場合は〜」シリーズ）
+     ==================================================================== */
+  function topicVars(an) {
+    return {
+      w: an.topic ? esc(an.topic) : '',
+      v: an.topicVerb ? esc(an.topicVerb) : '',
+      a: an.topicAdj ? esc(an.topicAdj) : '',
+      name: esc(userName() || 'あなた')
+    };
+  }
+
+  /** 「私の場合は〜」1行。形容詞 → 動詞 → 名詞の順で素材を選ぶ */
+  function selfLine(an) {
+    const vars = topicVars(an);
+    const r = Math.random();
+    if (vars.a && r < 0.25) return fill(pick(RP.selfAdj, 'sadj'), vars);
+    if (vars.v && r < 0.45) return fill(pick(RP.selfVerb, 'sverb'), vars);
+    if (vars.w) return fill(pick(RP.self, 'self'), vars);
+    if (vars.v) return fill(pick(RP.selfVerb, 'sverb'), vars);
+    if (vars.a) return fill(pick(RP.selfAdj, 'sadj'), vars);
+    return '';
+  }
+
+  function replyKeyword(an) {
+    const vars = topicVars(an);
+    const w = vars.w;
+    const lines = [];
+
+    /* ---- 質問 ---- */
+    if (an.isQuestion) {
+      /* 名詞の話題がなければ動詞・形容詞を「〜こと」にして話題にする */
+      if (!vars.w && vars.v) vars.w = vars.v + 'こと';
+      else if (!vars.w && vars.a) vars.w = vars.a + 'こと';
+      const w = vars.w;
+      /* はい/いいえ質問で述語があれば、主文だけ「猫が好き」の形で受ける */
+      const mainVars = Object.assign({}, vars);
+      if (an.qType === 'yesno' && an.topic && an.topicPred && an.topicPred !== an.topic) mainVars.w = esc(an.topic) + 'が' + esc(an.topicPred);
+      if (w) {
+        const arr = RP.question[an.qType] || RP.question.generic;
+        lines.push(fill(pick(arr, 'q:' + an.qType), mainVars));
+        if (chance(0.35)) lines.push(L(fill(pick(RP.askBack, 'askback'), vars), 'nomal'));
+        else if (chance(0.3)) lines.push(L(selfLine(an), 'raku'));
+        remember(w);
+      } else {
+        lines.push(pick(RP.questionNoTopic, 'qnt'));
+      }
+      setEmo(chance(0.3) ? 'housin' : 'nomal');
+      return lines.filter(Boolean);
+    }
+
+    /* ---- 平叙文 ---- */
+    const pol = an.polarity;
+    const tone = pol < -0.2 ? 'negative' : pol > 0.2 ? 'positive' : 'neutral';
+    setEmo(pol < -0.2 ? 'kanasi' : pol > 0.2 ? 'uresi' : 'nomal');
+
+    if (w) {
+      if (vars.a && chance(0.3)) lines.push(fill(pick(RP.statement.adj, 'sadj2'), vars));
+      else if (vars.v && chance(0.3)) lines.push(fill(pick(RP.statement.verb, 'sverb2'), vars));
+      else lines.push(fill(pick(RP.statement[tone], 'st:' + tone), vars));
+      const r = Math.random();
+      if (r < 0.45) lines.push(L(selfLine(an), 'raku'));
+      else if (r < 0.65 && tone !== 'neutral') lines.push(L(fill(pick(RP.meToo[tone], 'metoo'), vars), tone === 'negative' ? 'kanasi' : 'uresi'));
+      remember(w);
+      return lines.filter(Boolean);
+    }
+    if (vars.a) {
+      lines.push(fill(pick(RP.statement.adj, 'sadj2'), vars));
+      if (chance(0.5)) lines.push(L(fill(pick(RP.selfAdj, 'sadj'), vars), 'raku'));
+      return lines;
+    }
+    if (vars.v) {
+      lines.push(fill(pick(RP.statement.verb, 'sverb2'), vars));
+      if (chance(0.5)) lines.push(L(fill(pick(RP.selfVerb, 'sverb'), vars), 'raku'));
+      return lines;
+    }
+    /* 話題語なし: 記憶の蒸し返し or 汎用 */
+    if (memory.length && chance(0.3)) {
+      const m = memory[Math.floor(Math.random() * memory.length)];
+      return [pick([
+        'そういえば、さっき言ってた「' + esc(m) + '」の件、もう少し聞かせて？',
+        'ところで「' + esc(m) + '」の話、どうなった？',
+        '「' + esc(m) + '」のこと、まだ気になってる？'
+      ], 'mem')];
+    }
+    if (chance(0.4)) setEmo('housin');
+    return [pick(RP.statementNoTopic, 'snt')];
   }
 
   function replyGreeting(an) {
@@ -573,29 +674,6 @@ AZILE.brain = (function () {
       default:
         return null;
     }
-  }
-
-  function replyFallback(an) {
-    if (chance(0.4)) setEmo('housin');
-    if (memory.length && chance(0.3)) {
-      const m = memory[Math.floor(Math.random() * memory.length)];
-      return [pick([
-        'そういえば、さっき言ってた「' + esc(m) + '」の件、もう少し聞かせて？',
-        'ところで「' + esc(m) + '」の話、どうなった？',
-        '「' + esc(m) + '」のこと、まだ気になってる？'
-      ], 'mem')];
-    }
-    if (an.nouns.length && chance(0.45)) {
-      return [fill(pick(P.unknownWord, 'uw'), { w: esc(an.nouns[0]) })];
-    }
-    if (an.isQuestion && chance(0.5)) {
-      return [pick([
-        'うーん、いい質問。私の答えより、あなたはどう思う？',
-        'それ、私にも分からないんだよね。一緒に考えよ？ 仮説を出して。',
-        '質問には質問で返すのがElizaの家訓なんだけど…あなたはなぜそれが気になるの？'
-      ], 'q')];
-    }
-    return [pick(P.fallbacks, 'fb')];
   }
 
   /* ====================================================================
@@ -715,20 +793,27 @@ AZILE.brain = (function () {
       if (sp) return sp;
     }
 
+    /* 「〜って何？」「〜とは」型の定義質問だけ Wikipedia へ（「〜ってどうしたらいい？」は話題語ベースへ） */
     const wi = detectWhatIs(text);
-    if (wi) {
+    if (wi && (!an.isQuestion || an.qType === 'what' || an.qType === 'yesno')) {
       const r = await replyWhatIs(wi, an);
       if (r) return r;
     }
 
-    if (rr && rr.html) return [rr.html].concat(flavor(an));
+    /* 感情・話題に強く結びついた高優先ルール（rank 10 以上）はそのまま採用 */
+    if (rr && rr.html && rr.rank >= 10) return [rr.html].concat(flavor(an));
 
-    if (an.isQuestion && an.nouns.length && an.nouns[0].length >= 2 && chance(0.6)) {
-      const r = await replyWhatIs(an.nouns[0], an);
+    /* 「〜って何？」型の質問だけ Wikipedia を一回試す */
+    if (an.isQuestion && an.qType === 'what' && an.topic && chance(0.7)) {
+      const r = await replyWhatIs(an.topic, an);
       if (r) return r;
     }
 
-    return replyFallback(an).concat(flavor(an));
+    /* 低優先の汎用ルール（なぜ／と思う／みんな…）は時々使い、基本は話題語ベースの返答へ */
+    if (rr && rr.html && chance(0.35)) return [rr.html].concat(flavor(an));
+
+    const kr = replyKeyword(an);
+    return kr.length >= 2 ? kr : kr.concat(flavor(an));
   }
 
   /* ====================================================================

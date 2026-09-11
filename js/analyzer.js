@@ -40,6 +40,64 @@ AZILE.analyzer = (function () {
 
   const INTERROGATIVES = /(何|なに|なん|どこ|誰|だれ|いつ|なぜ|なんで|どうして|どう|どんな|いくつ|いくら|どっち|どちら|どれ|どの)/;
 
+  /* 疑問の種類（先に並んだものが優先。「なんで」は what より why、「どうして」は how より why） */
+  const Q_TYPES = [
+    ['why', /(なぜ|なんで|何で|どうして|理由)/],
+    ['how', /(どうやって|どうやれば|どうすれば|どうしたら|どうすりゃ|どのように|やり方|方法|どうする|どうしよう|どうしたい|どうなる|(何|なに)(を|が|から|に)?(すれ|したら|して|する|やれ|やっ|し|すべ)|すればいい|したらいい|するべき|すべき|べきか)/],
+    ['when', /(いつ|何時|何日|何曜|タイミング)/],
+    ['where', /(どこ|何処)/],
+    ['who', /(誰|だれ|どなた)/],
+    ['which', /(どっち|どちら|どれ|どの)/],
+    ['what', /(何|なに|なん|どんな|どういう|とは|って何|いくつ|いくら)/]
+  ];
+
+  function questionType(text, isQuestion) {
+    if (!isQuestion) return null;
+    for (const [type, re] of Q_TYPES) if (re.test(text)) return type;
+    return 'yesno';
+  }
+
+  /* 動詞・形容詞のうち話題にならないもの */
+  const VERB_STOP = new Set(['する', 'ある', 'いる', 'なる', 'できる', '思う', '言う', 'いう', 'くる', '来る', 'いく', '行く', 'やる',
+    'ください', 'くださる', 'てる', 'しまう', 'おく', 'みる', '見る', '教える', '分かる', 'わかる', '知る', '聞く', '話す', 'れる', 'られる',
+    'せる', 'させる', 'ござる', 'いただく', 'もらう', 'くれる', 'あげる', 'つく', 'とる', '取る', '持つ', '出る', '入る']);
+  const ADJ_STOP = new Set(['ない', 'いい', 'よい', '良い', 'ほしい', '欲しい', 'たい', 'らしい', 'すごい', 'やばい', '無い']);
+
+  /* 「好き」「大丈夫」「無理」などの形容動詞語幹は述語なので話題にしない */
+  function isTopicNoun(t) {
+    return t.pos.startsWith('名詞') && !['非自立', '代名詞', '接尾', '数', '特殊', '副詞可能', '形容動詞語幹', 'ナイ形容詞語幹', '動詞非自立的'].includes(t.detail) &&
+      !NOUN_STOP.has(t.surface) && !isPunct(t.surface) && !/^[0-9]+$/.test(t.surface);
+  }
+
+  /**
+   * 話題語を選ぶ: 名詞の連なり（複合名詞）を作り、直後の助詞で重み付け。
+   * 「〜は」「〜が」「〜って」の前の名詞を最優先、次に「〜を」「〜も」、以下「〜に」「〜で」「〜の」。
+   */
+  function pickTopic(tokens, nouns) {
+    const PRI = { 'は': 5, 'が': 4, 'って': 4, 'とは': 4, 'も': 3, 'を': 3, 'に': 2, 'で': 2, 'の': 1, 'と': 1 };
+    let best = null;
+    let bestScore = -1;
+    let i = 0;
+    while (i < tokens.length) {
+      if (isTopicNoun(tokens[i])) {
+        let j = i;
+        let buf = '';
+        while (j < tokens.length && isTopicNoun(tokens[j])) { buf += tokens[j].surface; j++; }
+        const next = tokens[j] ? tokens[j].surface : '';
+        let score = (PRI[next] || 0) + Math.min(buf.length, 6) / 10;
+        /* 1文字の名詞は漢字（猫・空・雨…）だけ、少し低い重みで候補にする */
+        const okLen = buf.length >= 2 || (buf.length === 1 && isKanji(buf));
+        if (!NOUN_STOP.has(buf) && okLen && score > bestScore) { bestScore = score; best = buf; }
+        i = j;
+      } else {
+        i++;
+      }
+    }
+    if (best) return best;
+    const cand = (nouns || []).find((n) => n.length >= 2);
+    return cand || null;
+  }
+
   /* ---- 正規化 --------------------------------------------------------- */
   function normalize(text) {
     let t = String(text || '');
@@ -170,17 +228,27 @@ AZILE.analyzer = (function () {
   function build(text, tokens, used) {
     const nouns = extractNouns(tokens);
     const verbs = tokens.filter((t) => t.pos === '動詞' && t.detail !== '非自立').map((t) => t.basic);
-    const adjectives = tokens.filter((t) => t.pos === '形容詞').map((t) => t.basic);
+    const adjectives = tokens.filter((t) => t.pos === '形容詞' && t.detail !== '非自立').map((t) => t.basic);
+    /* kuromoji のときだけ基本形が信頼できるので、話題にする動詞・形容詞はそのときだけ */
+    const topicVerb = used === 'kuromoji' ? (verbs.find((v) => !VERB_STOP.has(v) && v.length >= 2) || null) : null;
+    /* 述語候補: 形容動詞語幹（好き・苦手・大丈夫…）か形容詞の表層形 */
+    const predTok = tokens.find((t) => (t.pos.startsWith('名詞') && t.detail === '形容動詞語幹') || (t.pos === '形容詞' && t.detail !== '非自立'));
+    const topicPred = predTok ? predTok.surface : (/(好き|嫌い|苦手|得意|大丈夫|必要|大事|大切|無理|可能|便利|危険|安全)/.exec(text) || [null])[0];
+    const topicAdj = used === 'kuromoji' ? (adjectives.find((a) => !ADJ_STOP.has(a) && a.length >= 2) || null) : null;
 
     const isQuestion = /[?？]\s*$/.test(text) ||
-      /(か|かな|かしら|の|なの|でしょ|でしょう|ですか|ますか|だっけ|っけ|って何|ってなに|とは)\s*[?？]?$/.test(text) && INTERROGATIVES.test(text) ||
+      /(かな|かしら|だろうか|でしょうか|ですか|ますか|のか|んだろう)\s*$/.test(text) ||
+      /(か|かな|かしら|の|なの|でしょ|でしょう|ですか|ますか|だっけ|っけ|って何|ってなに|とは|だろう|だろ|のだろう|んだろう|のかな|んかな)\s*[?？]?$/.test(text) && INTERROGATIVES.test(text) ||
       /(教えて|知ってる|知ってます|わかる[?？]|分かる[?？])/.test(text);
     const isNegative = /(ない|ません|なかった|ぬ|ず)(です|よ|ね|。|$)/.test(text) || /ない$/.test(text);
     const isRequest = /(して|ちょうだい|頂戴|ください|下さい|お願い|してほしい|して欲しい|作って|出して|描いて|書いて|教えて|見せて|探して|調べて|言って|聞かせて)/.test(text);
 
     return {
       text, tokens, nouns, verbs, adjectives,
+      topic: pickTopic(tokens, nouns),
+      topicVerb, topicAdj, topicPred,
       isQuestion, isNegative, isRequest,
+      qType: questionType(text, isQuestion),
       polarity: polarity(text),
       engine: used
     };
