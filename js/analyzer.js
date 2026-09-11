@@ -202,33 +202,50 @@ AZILE.analyzer = (function () {
     if (kuroPromise) return kuroPromise;
     kuroPromise = new Promise((resolve) => {
       if (typeof Worker === 'function' && /^https?:/.test(location.protocol)) {
-        try {
-          worker = new Worker(WORKER_PATH);
-        } catch (_) {
-          worker = null;
-        }
-      }
-      if (worker) {
-        worker.onmessage = (e) => {
-          const msg = e.data || {};
-          if (msg.type === 'ready') { ready(); resolve(true); }
-          else if (msg.type === 'error') { console.warn('kuromoji worker:', msg.message); worker.terminate(); worker = null; resolve(false); }
-          else if (msg.type === 'tokens') {
-            const cb = pending.get(msg.id);
-            if (cb) { pending.delete(msg.id); cb(msg.tokens); }
-          }
-        };
-        worker.onerror = (err) => {
-          console.warn('kuromoji worker failed:', err && err.message);
-          try { worker.terminate(); } catch (_) { /* ignore */ }
-          worker = null;
-          resolve(false);
-        };
-        worker.postMessage({ type: 'init', script: KUROMOJI_SCRIPT, dicPath: DIC_PATH });
+        /* Worker のスクリプトは fetch で取得して Blob URL から起動する。
+           GitHub Pages 上でファイル URL の Worker から CDN を importScripts すると
+           完了しない現象があったため（Blob URL 経由なら同じコードで完走する）。 */
+        fetch(WORKER_PATH, { cache: 'no-cache' })
+          .then((res) => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.text(); })
+          .then((src) => {
+            const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+            worker = new Worker(url);
+            attachWorker(resolve);
+          })
+          .catch((err) => {
+            console.warn('kuromoji worker: could not start', err && err.message);
+            worker = null;
+            resolve(false);
+          });
         return;
       }
+      resolve(loadInThread());
+    });
+    return kuroPromise;
+  }
 
-      /* フォールバック: 同一スレッド */
+  function attachWorker(resolve) {
+    worker.onmessage = (e) => {
+      const msg = e.data || {};
+      if (msg.type === 'ready') { ready(); resolve(true); }
+      else if (msg.type === 'error') { console.warn('kuromoji worker:', msg.message); worker.terminate(); worker = null; resolve(false); }
+      else if (msg.type === 'tokens') {
+        const cb = pending.get(msg.id);
+        if (cb) { pending.delete(msg.id); cb(msg.tokens); }
+      }
+    };
+    worker.onerror = (err) => {
+      console.warn('kuromoji worker failed:', err && err.message);
+      try { worker.terminate(); } catch (_) { /* ignore */ }
+      worker = null;
+      resolve(false);
+    };
+    worker.postMessage({ type: 'init', script: KUROMOJI_SCRIPT, dicPath: DIC_PATH });
+  }
+
+  /* フォールバック: 同一スレッド（Worker が使えない環境。Node のテストなど） */
+  function loadInThread() {
+    return new Promise((resolve) => {
       if (typeof window.kuromoji === 'undefined') { resolve(false); return; }
       try {
         window.kuromoji.builder({ dicPath: DIC_PATH }).build((err, tokenizer) => {
@@ -241,7 +258,6 @@ AZILE.analyzer = (function () {
         resolve(false);
       }
     });
-    return kuroPromise;
   }
 
   function onEngineChange(fn) { listeners.push(fn); }
