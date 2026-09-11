@@ -53,9 +53,8 @@ body {
   inset: 0;
   z-index: 10;
   background:
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, .12) 0px, rgba(0, 0, 0, .12) 1px, transparent 1px, transparent 3px),
-    radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, .45) 100%);
-  mix-blend-mode: multiply;
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .10) 0px, rgba(0, 0, 0, .10) 1px, transparent 1px, transparent 3px),
+    radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, .40) 100%);
   opacity: .8;
 }
 
@@ -87,7 +86,6 @@ body {
   padding: 10px 16px;
   border-bottom: 1px solid var(--line);
   background: rgba(0, 0, 0, .25);
-  backdrop-filter: blur(6px);
 }
 
 .term-title {
@@ -141,6 +139,15 @@ body {
 .status-pill.ok b { color: var(--green); }
 .status-pill.bad b { color: var(--red); }
 .status-clock { font-variant-numeric: tabular-nums; color: var(--fg-mute); }
+.status-pill.loading b { color: var(--fg-dim); font-weight: 400; }
+.loading-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin: 0 6px 1px 8px;
+  border-radius: 50%;
+  background: var(--amber);
+  animation: blink 1.2s ease-in-out infinite;
+}
 
 /* --------------------------------------------------------------------------
    Body: chat column + character panel
@@ -186,7 +193,6 @@ body {
   height: auto;
   filter: drop-shadow(0 8px 18px rgba(0, 0, 0, .55));
   transition: opacity .16s ease, transform .16s ease;
-  animation: bob 4s ease-in-out infinite;
 }
 .sprite.swap { opacity: 0; transform: translateY(4px); }
 .sprite-label {
@@ -368,12 +374,11 @@ body {
    Animations / accessibility
    -------------------------------------------------------------------------- */
 @keyframes blink { 50% { opacity: 0; } }
-@keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
 @keyframes rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .line { animation: none; }
-  .sprite { animation: none; transition: none; }
+  .sprite { transition: none; }
   .typing::after { animation: none; }
   .term-output { scroll-behavior: auto; }
 }

@@ -622,7 +622,7 @@ AZILE.brain = (function () {
   async function respond(raw) {
     turn += 1;
     curEmo = null;
-    const an = A.analyze(raw);
+    const an = await A.analyzeAsync(raw);
     const text = an.text;
     if (!text) return finish(['…（無言）。何か言ってくれると嬉しいな。'], 'housin');
 

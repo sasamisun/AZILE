@@ -66,10 +66,14 @@ AZILE.ui = (function () {
   }
 
   /* ---- ステータス表示 -------------------------------------------------- */
+  /** name: 'tiny' | 'loading'（Worker で辞書を読込中） | 'kuromoji' */
   function setEngine(name) {
     if (!els.engine) return;
-    els.engine.innerHTML = 'ENGINE: <b>' + (name === 'kuromoji' ? 'KUROMOJI' : 'TINY') + '</b>';
+    const label = name === 'kuromoji' ? 'KUROMOJI' : name === 'loading' ? 'TINY <i class="loading-dot" aria-hidden="true"></i>辞書DL中' : 'TINY';
+    els.engine.innerHTML = 'ENGINE: <b>' + label + '</b>';
     els.engine.classList.toggle('ok', name === 'kuromoji');
+    els.engine.classList.toggle('loading', name === 'loading');
+    els.engine.title = name === 'loading' ? 'kuromoji.js の辞書（約18MB）を別スレッドで読み込み中。その間は TinySegmenter で応答します' : '形態素解析エンジン';
   }
 
   function setNet(state) {

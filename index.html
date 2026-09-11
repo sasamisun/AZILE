@@ -50,9 +50,8 @@
     </div>
   </main>
 
-  <!-- 形態素解析: TinySegmenter（即時） + kuromoji.js（辞書ロード後に切替） -->
+  <!-- 形態素解析: TinySegmenter（即時） + kuromoji.js（Web Worker 内で辞書ロード後に切替） -->
   <script src="js/lib/tiny_segmenter.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js" defer></script>
 
   <!-- アプリ本体 -->
   <script src="js/data/persona.js"></script>

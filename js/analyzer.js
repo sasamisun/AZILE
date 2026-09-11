@@ -8,13 +8,19 @@ window.AZILE = window.AZILE || {};
 AZILE.analyzer = (function () {
   'use strict';
 
+  const KUROMOJI_SCRIPT = 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js';
   const DIC_PATH = 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/';
+  const WORKER_PATH = 'js/kuromoji-worker.js';
+  const WORKER_TIMEOUT = 4000;   // Worker の応答がこれ以上遅ければ TinySegmenter で代替
 
   let engine = 'tiny';
   let tiny = null;
-  let kuro = null;
+  let kuro = null;               // 同一スレッド版 tokenizer（Worker が使えない環境のみ）
+  let worker = null;             // Web Worker 版
   let kuroPromise = null;
   const listeners = [];
+  const pending = new Map();     // Worker へのリクエスト id → resolve
+  let seq = 0;
 
   /* ---- 代名詞・形式名詞など、キーワードとして拾いたくない名詞 ---------- */
   const NOUN_STOP = new Set([
@@ -78,7 +84,7 @@ AZILE.analyzer = (function () {
     }));
   }
 
-  /* ---- kuromoji → トークン ---------------------------------------------- */
+  /* ---- kuromoji → トークン（同一スレッド版） ----------------------------- */
   function kuroTokens(text) {
     return kuro.tokenize(text).map((t) => ({
       surface: t.surface_form,
@@ -87,6 +93,18 @@ AZILE.analyzer = (function () {
       basic: (t.basic_form && t.basic_form !== '*') ? t.basic_form : t.surface_form,
       reading: (t.reading && t.reading !== '*') ? t.reading : ''
     }));
+  }
+
+  /* ---- kuromoji → トークン（Worker 版・非同期） ------------------------- */
+  function workerTokens(text) {
+    return new Promise((resolve) => {
+      if (!worker) { resolve(null); return; }
+      const id = ++seq;
+      const timer = setTimeout(() => { pending.delete(id); resolve(null); }, WORKER_TIMEOUT);
+      pending.set(id, (tokens) => { clearTimeout(timer); resolve(tokens); });
+      try { worker.postMessage({ type: 'tokenize', id, text }); }
+      catch (_) { clearTimeout(timer); pending.delete(id); resolve(null); }
+    });
   }
 
   /* ---- 名詞抽出（複合名詞の連結つき） ---------------------------------- */
@@ -124,17 +142,32 @@ AZILE.analyzer = (function () {
   }
 
   /* ---- メイン --------------------------------------------------------- */
+  /** 同期版: TinySegmenter か、同一スレッドの kuromoji（Node テスト用）を使う */
   function analyze(raw) {
     const text = normalize(raw);
     let tokens;
     let used = engine;
     try {
       tokens = engine === 'kuromoji' && kuro ? kuroTokens(text) : tinyTokens(text);
+      if (!kuro) used = 'tiny';
     } catch (_) {
       tokens = tinyTokens(text);
       used = 'tiny';
     }
+    return build(text, tokens, used);
+  }
 
+  /** 非同期版: Worker の kuromoji が使えればそれを、遅ければ TinySegmenter を使う */
+  async function analyzeAsync(raw) {
+    const text = normalize(raw);
+    if (engine === 'kuromoji' && worker) {
+      const tokens = await workerTokens(text);
+      if (tokens) return build(text, tokens, 'kuromoji');
+    }
+    return analyze(raw);
+  }
+
+  function build(text, tokens, used) {
     const nouns = extractNouns(tokens);
     const verbs = tokens.filter((t) => t.pos === '動詞' && t.detail !== '非自立').map((t) => t.basic);
     const adjectives = tokens.filter((t) => t.pos === '形容詞').map((t) => t.basic);
@@ -154,26 +187,59 @@ AZILE.analyzer = (function () {
   }
 
   /* ---- kuromoji の非同期ロード ------------------------------------------ */
+  function ready() {
+    engine = 'kuromoji';
+    listeners.forEach((fn) => { try { fn('kuromoji'); } catch (_) { /* ignore */ } });
+  }
+
+  /**
+   * ブラウザでは Web Worker で辞書を展開・構築する（18MB の展開と trie 構築を
+   * メインスレッドで行うと遅い環境で数十秒固まり「ページが応答しません」になるため）。
+   * Worker が使えない環境（Node のテストなど）では、すでに読み込まれた
+   * window.kuromoji を同一スレッドで使う。
+   */
   function loadKuromoji() {
     if (kuroPromise) return kuroPromise;
     kuroPromise = new Promise((resolve) => {
-      const start = () => {
-        if (typeof window.kuromoji === 'undefined') { resolve(false); return; }
+      if (typeof Worker === 'function' && /^https?:/.test(location.protocol)) {
         try {
-          window.kuromoji.builder({ dicPath: DIC_PATH }).build((err, tokenizer) => {
-            if (err || !tokenizer) { resolve(false); return; }
-            kuro = tokenizer;
-            engine = 'kuromoji';
-            listeners.forEach((fn) => { try { fn('kuromoji'); } catch (_) { /* ignore */ } });
-            resolve(true);
-          });
+          worker = new Worker(WORKER_PATH);
         } catch (_) {
-          resolve(false);
+          worker = null;
         }
-      };
-      /* kuromoji.js は defer 読込なので、まだ無ければ load を待つ */
-      if (typeof window.kuromoji !== 'undefined' || document.readyState === 'complete') start();
-      else window.addEventListener('load', start, { once: true });
+      }
+      if (worker) {
+        worker.onmessage = (e) => {
+          const msg = e.data || {};
+          if (msg.type === 'ready') { ready(); resolve(true); }
+          else if (msg.type === 'error') { console.warn('kuromoji worker:', msg.message); worker.terminate(); worker = null; resolve(false); }
+          else if (msg.type === 'tokens') {
+            const cb = pending.get(msg.id);
+            if (cb) { pending.delete(msg.id); cb(msg.tokens); }
+          }
+        };
+        worker.onerror = (err) => {
+          console.warn('kuromoji worker failed:', err && err.message);
+          try { worker.terminate(); } catch (_) { /* ignore */ }
+          worker = null;
+          resolve(false);
+        };
+        worker.postMessage({ type: 'init', script: KUROMOJI_SCRIPT, dicPath: DIC_PATH });
+        return;
+      }
+
+      /* フォールバック: 同一スレッド */
+      if (typeof window.kuromoji === 'undefined') { resolve(false); return; }
+      try {
+        window.kuromoji.builder({ dicPath: DIC_PATH }).build((err, tokenizer) => {
+          if (err || !tokenizer) { resolve(false); return; }
+          kuro = tokenizer;
+          ready();
+          resolve(true);
+        });
+      } catch (_) {
+        resolve(false);
+      }
     });
     return kuroPromise;
   }
@@ -181,5 +247,5 @@ AZILE.analyzer = (function () {
   function onEngineChange(fn) { listeners.push(fn); }
   function currentEngine() { return engine; }
 
-  return { analyze, normalize, loadKuromoji, onEngineChange, currentEngine, NOUN_STOP };
+  return { analyze, analyzeAsync, normalize, loadKuromoji, onEngineChange, currentEngine, NOUN_STOP };
 })();

@@ -126,12 +126,12 @@
     S.markSeen();
 
     /* kuromoji を裏でロード */
-    UI.setEngine('tiny');
+    UI.setEngine('loading');
     A.onEngineChange((name) => {
       UI.setEngine(name);
       UI.sysQueued('kuromoji.js の辞書ロード完了。品詞付きの本格解析に切り替えたよ。');
     });
-    A.loadKuromoji().then((ok) => { if (!ok) UI.sysQueued('kuromoji.js の辞書を読み込めなかったので TinySegmenter のまま続けるね。'); });
+    A.loadKuromoji().then((ok) => { if (!ok) { UI.setEngine('tiny'); UI.sysQueued('kuromoji.js の辞書を読み込めなかったので TinySegmenter のまま続けるね。'); } });
 
     UI.focus();
   }

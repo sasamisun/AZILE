@@ -83,6 +83,7 @@ index.html                画面骨格
 css/style.css             コンソール風テーマ
 js/lib/tiny_segmenter.js  TinySegmenter（工藤拓氏、BSD ライセンス）
 js/analyzer.js            形態素解析の抽象層（TinySegmenter → kuromoji.js に自動切替）
+js/kuromoji-worker.js     kuromoji.js を動かす Web Worker（辞書構築と解析を別スレッドで）
 js/data/persona.js        セリフ・ジョーク・定数・法令名テーブルなど静的データ
 js/data/rules.js          Eliza ルール表（キーワード／分解パターン／再構成テンプレ）
 js/api.js                 e-Gov / Wikipedia / Open-Meteo ラッパー
@@ -96,7 +97,8 @@ js/app.js                 起動と配線
 ### 形態素解析
 
 起動直後は辞書不要の TinySegmenter で即応答し、裏で kuromoji.js の辞書（jsDelivr CDN、初回約 18 MB・以降はブラウザキャッシュ）を読み込みます。
-ロードが終わるとヘッダーの表示が `ENGINE: TINY` → `ENGINE: KUROMOJI` に変わり、品詞・基本形付きの解析に切り替わります。読み込みに失敗しても TinySegmenter のまま動きます。
+辞書の展開・構築と形態素解析は [js/kuromoji-worker.js](js/kuromoji-worker.js) の **Web Worker** で行うので、メインスレッド（画面）は一切ブロックされません（以前はメインスレッドで構築していたため、遅い環境で「ページが応答しません」になることがありました）。
+読み込み中はヘッダーに `ENGINE: TINY ● 辞書DL中` と出て、終わると `ENGINE: KUROMOJI` に変わり、品詞・基本形付きの解析に切り替わります。読み込みに失敗しても TinySegmenter のまま動きます。
 
 ### 外部 API（すべて認証不要）
 
